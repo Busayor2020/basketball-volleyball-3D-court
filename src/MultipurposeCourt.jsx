@@ -53,15 +53,17 @@ export const SHEET = {
   },
 };
 
-/* Title block. Eight fields, laid out 4 x 2 on screen and on the sheet. */
-export const SPECS = () => [
+/* Title block. Eight fields, laid out 4 x 2 on screen and on the sheet.
+   `coats` (2 or 3) drives the acrylic finish line; see the coats toggle
+   under the Layers panel. */
+export const SPECS = (coats = 3) => [
   ["Client", `${SHEET.client}, ${SHEET.location}`],
   ["Slab", "19.000 × 9.000 m · 150 mm RC"],
   ["Volleyball", "18.000 × 9.000 · FIVB · net 2.240"],
   ["Basketball", "16.800 × 9.000 · FIBA × 0.60 · rim 3.050"],
   ["Orientation", "Long axis set out north / south"],
   ["Falls", "1:100 crossfall to channel drain, south"],
-  ["Finish", "3-coat acrylic hard court, sawn joints 4.75 × 4.50"],
+  ["Finish", `${coats}-coat acrylic hard court, sawn joints 4.75 × 4.50`],
   ["Status", SHEET.status],
 ];
 
@@ -126,6 +128,18 @@ const PAINT = {
   bb: "#F5C453",
 };
 
+/* a thinner acrylic film (2 coats) builds up less colour and lets more of
+   the grey primer show through, so the field reads lighter and flatter
+   than a full 3-coat build. Mixes the fill colour toward mid-grey. */
+const thinFilm = (hex, amt) => {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const gC = (n >> 8) & 255;
+  const b = n & 255;
+  const mix = (c) => Math.round(c + (176 - c) * amt);
+  return `rgb(${mix(r)}, ${mix(gC)}, ${mix(b)})`;
+};
+
 const UI = {
   ink: "#171C1E",
   rule: "rgba(226,232,232,0.16)",
@@ -146,7 +160,7 @@ const DATE_STR = new Date()
 /* ---------------------------------------------------------------- court
    The whole 19 x 9 painted surface is baked into one canvas texture.
    PPM px/m, so a 50 mm line is LW * PPM px.                            */
-function buildCourtTexture(showVB, showBB) {
+function buildCourtTexture(showVB, showBB, coats = 3) {
   const cv = document.createElement("canvas");
   cv.width = Math.round(SLAB_L * PPM);
   cv.height = Math.round(SLAB_W * PPM);
@@ -167,13 +181,14 @@ function buildCourtTexture(showVB, showBB) {
   };
 
   /* base coats */
-  g.fillStyle = PAINT.runoff;
+  const thin = coats <= 2;
+  g.fillStyle = thin ? thinFilm(PAINT.runoff, 0.22) : PAINT.runoff;
   g.fillRect(0, 0, cv.width, cv.height);
-  g.fillStyle = PAINT.play;
+  g.fillStyle = thin ? thinFilm(PAINT.play, 0.22) : PAINT.play;
   g.fillRect(X(-VB_L / 2), Z(-VB_W / 2), P(VB_L), P(VB_W));
 
   if (showBB) {
-    g.fillStyle = PAINT.key;
+    g.fillStyle = thin ? thinFilm(PAINT.key, 0.22) : PAINT.key;
     [1, -1].forEach((s) => {
       const x0 = Math.min(X(s * BX), X(s * BX - s * KEY_D));
       g.fillRect(x0, Z(-KEY_HW), P(KEY_D), P(KEY_HW * 2));
@@ -267,10 +282,12 @@ function buildCourtTexture(showVB, showBB) {
   }
 
   /* granular acrylic finish, speck count and size scaled off PPM so the
-     grain stays the same physical size whatever the map resolution */
-  const speck = Math.round(9000 * (PPM / 150) ** 2);
+     grain stays the same physical size whatever the map resolution.
+     Fewer coats build up less film thickness, so the aggregate texture
+     underneath shows through more strongly. */
+  const speck = Math.round((thin ? 15000 : 9000) * (PPM / 150) ** 2);
   const sz = Math.max(2, Math.round((2 * PPM) / 150));
-  g.globalAlpha = 0.045;
+  g.globalAlpha = thin ? 0.085 : 0.045;
   for (let i = 0; i < speck; i++) {
     g.fillStyle = i % 2 ? "#ffffff" : "#000000";
     g.fillRect(Math.random() * cv.width, Math.random() * cv.height, sz, sz);
@@ -461,7 +478,7 @@ const pdfSafe = (s) =>
     .replace(/[^\u0000-\u00FF]/g, "");
 
 function drawSheet(doc, shot, state) {
-  const { view, sun, lay } = state;
+  const { view, sun, lay, coats } = state;
   const T = pdfSafe;
 
   const PW = doc.internal.pageSize.getWidth();
@@ -592,7 +609,7 @@ function drawSheet(doc, shot, state) {
   /* spec grid */
   const GW = X1 - GX;
   const CW = GW / 4;
-  SPECS().forEach(([k, v], i) => {
+  SPECS(coats).forEach(([k, v], i) => {
     const c = i % 4;
     const r = Math.floor(i / 4);
     const x = GX + c * CW;
@@ -684,6 +701,7 @@ export default function MultipurposeCourt() {
   const [lay, setLay] = useState(() =>
     Object.fromEntries(LAYERS.map((l) => [l.k, l.on])),
   );
+  const [coats, setCoats] = useState(3);
 
   const toggle = (k) => setLay((p) => ({ ...p, [k]: !p[k] }));
 
@@ -1333,7 +1351,7 @@ export default function MultipurposeCourt() {
     const n3 = label("VB 18.000 x 9.000 FIVB", 0.42, "#F2EFE6");
     n3.position.set(-5.5, 0.9, -2.2);
     dimG.add(n3);
-    const n4 = label("BB 16.800 x 9.000  FIBA x 0.60", 0.42);
+    const n4 = label("BB 18.000 x 9.000  FIBA x 0.60", 0.42);
     n4.position.set(5.2, 0.9, 2.4);
     dimG.add(n4);
 
@@ -1546,16 +1564,19 @@ export default function MultipurposeCourt() {
     };
   }, []);
 
-  /* markings */
+  /* markings + finish : coats affects both the baked-in grain (rougher,
+     more visible aggregate with fewer coats) and the surface roughness
+     the renderer shades it with (matte at 2 coats, fuller sheen at 3) */
   useEffect(() => {
     const c = R.current.court;
     if (!c) return;
     if (c.material.map) c.material.map.dispose();
-    const t = buildCourtTexture(lay.vb, lay.bb);
+    const t = buildCourtTexture(lay.vb, lay.bb, coats);
     t.anisotropy = R.current.aniso || 1;
     c.material.map = t;
+    c.material.roughness = coats <= 2 ? 0.72 : 0.55;
     c.material.needsUpdate = true;
-  }, [lay.vb, lay.bb]);
+  }, [lay.vb, lay.bb, coats]);
 
   /* layers */
   useEffect(() => {
@@ -1725,7 +1746,7 @@ export default function MultipurposeCourt() {
           format: SHEET.export.pdfFormat,
           compress: true,
         });
-        drawSheet(doc, shot, { view, sun, lay });
+        drawSheet(doc, shot, { view, sun, lay, coats });
         doc.save(`${fileBase()}.pdf`);
       }
     } catch (e) {
@@ -1857,6 +1878,23 @@ export default function MultipurposeCourt() {
                 <Layer k={l.k} code={l.code} name={l.name} />
               </React.Fragment>
             ))}
+
+            {/* acrylic finish : 2 or 3 coats, drives the "Finish" spec line
+                on screen and on the exported PDF sheet */}
+            <div
+              className="my-1 border-t pt-1"
+              style={{ borderColor: UI.rule }}
+            />
+            <div className="tracking-[0.09em]" style={{ color: UI.dim }}>
+              Finish coats
+            </div>
+            <div className="mt-1 flex gap-1">
+              {[2, 3].map((n) => (
+                <Chip key={n} on={coats === n} onClick={() => setCoats(n)}>
+                  {n} coat
+                </Chip>
+              ))}
+            </div>
           </div>
 
           {/* view + sun */}
@@ -1914,7 +1952,7 @@ export default function MultipurposeCourt() {
           className="grid grid-cols-2 border-t text-[8px] uppercase sm:grid-cols-4"
           style={{ borderColor: UI.rule }}
         >
-          {SPECS().map(([k, v]) => (
+          {SPECS(coats).map(([k, v]) => (
             <div
               key={k}
               className="border-b border-r px-2 py-[6px]"
